@@ -4433,3 +4433,104 @@ Also corrected: an early per-skill table read `impact` off `World.combat.bar` en
 which do not carry it, so `weights` defaulted to 1 and all nine skills reported an
 identical 14 ms. The live path passes `skill.impact` from the SKILLS table (combat.js:450)
 and was always correct.
+
+
+# "Character body is brokenly animating" — the additive layer was integrating
+
+Reported as the body animating brokenly, then more precisely as looking like the standing
+character was ragdolling. Both readings were pointing at the same defect, and the second was
+the better clue: it only happened while STANDING STILL.
+
+## What was actually wrong
+
+The skeleton was folded ~83 degrees forward, face-down, permanently. Measured by comparing
+every bone's world Y against its bind position (feet at 0):
+
+    bone        bind    actual   delta
+    head        1.72     1.194   -0.526
+    clavicleR   1.54     1.084   -0.456
+    neck        1.60     1.162   -0.438
+    chest       1.46     1.143   -0.317
+    pelvis      0.95     0.950    0.000
+    thighL      0.92     0.920    0.000
+    footL       0.08     0.081   +0.001
+
+Per-segment rise told the story exactly: spine01->spine02 should rise 0.18 and rose 0.022;
+spine02->chest 0.18 -> 0.021; chest->neck 0.14 -> 0.019. The whole spine was horizontal.
+Legs and pelvis were pixel-perfect. Hands sat ABOVE the chest.
+
+Local rotations showed the mechanism: `spine01.z` read -146.8 deg (having wrapped past 180)
+where STANCE specifies 0, and `chest.x` swept -23.9 -> +39.9 deg over 40 frames when the
+additive breathing layer only adds 2 deg. A 64 deg sweep from a 2 deg input is not a scale
+error -- it is the INTEGRAL of the input.
+
+## Root cause: PropertyMixer skips unchanged values
+
+`_additive()` and `_footIK()` MULTIPLY into bone quaternions (`addRot` does
+`bone.quaternion.multiply(delta)`). anim.js's own comment asserted this was safe because
+"every bone gets a track so the mixer resets it each frame". That assumption is false.
+
+`PropertyMixer.apply` only calls `binding.setValue` when the mixed value differs from the
+previous frame. While standing, `idle`'s chest/spine/neck/head tracks are effectively
+CONSTANT -- so after the first frame three.js stops writing those bones entirely, and the
+additive delta compounds on its own previous output.
+
+Proven three ways:
+
+1. **Zeroing test.** Set `chest.quaternion` and `spine01.quaternion` to identity, then let
+   frames run. They grew LINEARLY from zero -- chest +0.60 deg/frame, spine01.z
+   +0.78 deg/frame -- and never returned to STANCE. A mixer-driven bone would have snapped
+   back on the next frame.
+2. **Patching `AnimationMixer.prototype.update`** and comparing the quaternion before/after
+   the call: `written: false` for pelvis, chest AND spine01, while `idleWeight: 1`,
+   `idleEnabled: true`, 23 tracks, `nActiveBindings: 23`. The mixer was running and bound,
+   and still wrote nothing.
+3. **Standing vs walking.** The same instrument, counting frames where the mixer changed
+   `chest`:
+
+       standing   0 of 73 frames    (0%)
+       walking   89 of 90 frames   (98.9%)
+
+   Walking varies chest's track, so it gets written every frame and never drifts. That is
+   why the defect appeared only while standing -- exactly as reported.
+
+Bindings were NOT the problem: `PropertyBinding.findNode` resolved every bone name, and
+three.js logged zero warnings.
+
+## Fix
+
+The controller now keeps its own copy of the mixer's output for the bones the additive layer
+and foot IK touch (spine chain, neck, head, clavicles, thighs, shins). Each frame:
+
+    restore  _base -> bone.quaternion     (so the mixer's skip is harmless)
+    mixer.update(dt)                      (writes if anything changed)
+    snapshot bone.quaternion -> _base     (clean, mixer-authored pose)
+    _additive(...) / _footIK(...)         (applied to that clean base)
+
+The additive layer therefore never sees its own previous result.
+
+## Verified
+
+    after 6 s standing still     max bone deviation from bind   0.526 -> 0.036
+    spine01.z                    -146.8 deg climbing -> 0.68 deg, range 0.11 deg
+    chest.x                      64 deg unbounded sweep -> 1.58 deg range (the 2 deg breath)
+    head world Y                 1.194 -> 1.707  (bind 1.72)
+
+No regression elsewhere:
+- walk: thighs swing 55-64 deg, spine stable 0.6 deg standing
+- all 9 skills + roll + attacks fired: `bonesDriftedVsBefore: []`, max deviation 0.044
+- death via the real damage path (killed by monsters): pelvis collapses 0.94 -> 0.19,
+  0 non-finite bones
+- restart: upright, max deviation 0.053
+
+`AnimController` is player-only, and `player.js` returns before `anim.update()` while
+`p.ragdolling` is set, so the `_base` restore can never fight a ragdoll.
+
+## Instrument note
+
+`p.hp = 0` does NOT kill the player -- it bypasses `hurt()`, so the death clip and ragdoll
+never fire. That leg of the first death test was void (`collapsed: false` with the pelvis
+never moving). Letting the monsters do the killing exercised the real path and it worked.
+Also: a "still walking after stopping" reading (63 deg thigh swing while standing) was
+momentum during the deceleration window -- speed decayed 1.87 -> 0 and the thigh settled to a
+constant 6.2 deg with 0.0 deg range.

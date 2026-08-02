@@ -332,6 +332,36 @@ export class AnimController {
     this.foot = { L: { locked: false, lock: new THREE.Vector3(), w: 0 }, R: { locked: false, lock: new THREE.Vector3(), w: 0 } };
     this.ikEnabled = true;
 
+    // ---- additive-layer base pose (the standing-still drift fix) ----------------
+    //
+    // `_additive` and `_footIK` MULTIPLY into bone quaternions. That is only safe if the
+    // mixer rewrites every bone it owns each frame. It does not.
+    //
+    // `PropertyMixer.apply` skips `binding.setValue` when the mixed value is unchanged
+    // from the previous frame. While standing, `idle`'s chest/spine/neck/head tracks are
+    // effectively CONSTANT, so after the first frame Three.js stops writing them — and the
+    // additive delta then compounds on its own output, frame after frame.
+    //
+    // Measured: mixer wrote `chest` on 0 of 73 frames standing, but 89 of 90 walking.
+    // Standing, `chest.x` integrated to +36 deg and `spine01.z` past -146 deg (wrapping
+    // through 180), folding the spine ~83 deg forward. Every bone the additive layer
+    // touches drifted; legs and pelvis, which it barely touches, stayed exact.
+    //
+    // Fix: keep our own copy of the mixer's output for exactly those bones. Each frame we
+    // restore it BEFORE `mixer.update`, so the mixer's skip is harmless (the value it
+    // would have written is already there), then snapshot it AFTER the mixer and apply the
+    // additive layer to that clean base. The additive layer therefore never sees its own
+    // previous result.
+    this._addBones = ['pelvis', 'spine01', 'spine02', 'chest', 'neck', 'head',
+                      'clavicleL', 'clavicleR',
+                      // foot IK writes these two pairs
+                      'thighL', 'shinL', 'thighR', 'shinR'];
+    this._base = new Map();
+    for (const n of this._addBones) {
+      const b = rig.bones[rig.boneOf(n)];
+      if (b) this._base.set(b, b.quaternion.clone());
+    }
+
     this.mixer.addEventListener('finished', (e) => {
       if (this.active && e.action === this.active.action && !this.active.sticky) this.active = null;
     });
@@ -383,7 +413,17 @@ export class AnimController {
       }
     }
 
+    // Restore the mixer's own output for every bone the additive layer / IK will touch.
+    // Without this, a bone the mixer chose not to rewrite (because its track value did not
+    // change) still carries LAST frame's additive delta, and the new delta compounds on it.
+    for (const [bone, q] of this._base) bone.quaternion.copy(q);
+
     this.mixer.update(dt);
+
+    // Snapshot the clean, mixer-authored pose. This is the base the additive layer and the
+    // foot IK are allowed to modify, and it is what gets restored next frame.
+    for (const [bone, q] of this._base) q.copy(bone.quaternion);
+
     if (!this.dead) this._additive(p, dt, runW, moveW);
     this.rig.group.updateMatrixWorld(true);
     if (!this.dead && !this.busy && this.ikEnabled) this._footIK(p);
