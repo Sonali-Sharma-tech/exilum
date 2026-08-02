@@ -4334,3 +4334,27 @@ it is off by default and why `stats.droppedInFrustum` is surfaced live on F3 —
 be able to take this trade without seeing what it costs.
 
 Capping also shortens the ladder, so fewer shader variants are prewarmed at boot.
+
+
+## Dead end: forcing top-down `renderOrder` for early-Z (0.00 ms)
+
+Three.js sorts opaque objects by renderOrder, then program, then material id, with DEPTH as
+the last key — so the stacked screen-covering meshes are grouped by shader, not drawn
+front-to-back, and early-Z rejects nothing. Overdraw measures 2.32x, so forcing the
+topmost surface to draw first looked free and promising.
+
+Measured with the light count PINNED at 20 (a `setInterval` VFX driver had to be removed
+first: it spawned lights at random and produced 38% drift, which manufactured a fake
+"12.64 ms saving" from light-count variance alone). Four legs, A-B-A-B:
+
+    baseline    48.6 fps   20.58 ms   drift 0.4%
+    top-down    48.5 fps   20.60 ms   drift 0.2%
+    saving      -0.02 ms
+
+Zero. The meshes that span the level in BOUNDS (kit-stoneWall, kit-wallAshlar) are walls —
+huge bounding boxes, little actual screen coverage — so they cannot occlude the floor
+regardless of order. The 2.32x overdraw is not depth-rejectable by reordering.
+
+Combined with the depth-prepass result (loses 1.63 ms once done correctly into the
+composer's buffer), overdraw is now a closed question on this renderer: it is real, and it
+is not recoverable without paying more in draw calls than it saves in fragments.
