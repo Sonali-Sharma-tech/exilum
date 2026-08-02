@@ -4272,3 +4272,45 @@ Verified on the shipped tree, rAF-clocked, real keyboard/mouse input:
     cull A-B-A     42.1 -> 101.7 fps (2.42x, -13.92 ms), return drift 15.9% vs 122% effect
     losslessness   0 differing pixels of 9,072,000 across all 7 rooms
     integrity      droppedInFrustum 0, offRung 0, 0 JS errors, ultra + AO on
+
+
+## Shadow-map skip for the static brazier (lossless, 0.64 ms)
+
+Shadow re-rendering costs a measured **1.36 ms of a 14.20 ms combat frame (9.6%)** with 50
+visible casters and 30 monsters — isolated with `renderer.shadowMap.autoUpdate = false`,
+which keeps maps and programs identical so there is no recompile in the measurement.
+A-B-A return drift was **0.0%** (70.4 / 77.9 / 70.4 fps).
+
+Split by light type, same method (drift 0.3%):
+
+    PointLight cube map (6 faces, 512^2)   0.59 ms
+    3 CSM cascades (2048^2)                0.80 ms
+
+The cube map is the recoverable half: a brazier never moves, so its shadow can only change
+when a DYNAMIC caster is inside its reach. `props.js` now sets `shadow.autoUpdate = false`
+and raises `needsUpdate` only when a monster/player/ragdoll is within `distance + 1.6 wu`,
+any gib is mid-simulation, or the pool reassigns the slot — plus one extra frame after the
+last mover leaves, so the departing shadow is cleared rather than frozen in place.
+
+Proven lossless in BOTH directions, engine frozen and the same frame rendered twice:
+
+    skip engaged (nearest mover 17.2 wu, outside reach 16)   0 of 1,296,000 px differ
+    skip must NOT engage (monster 5.5 wu, inside reach 16)   0 of 1,296,000 px differ
+
+Measured gain in a pinned heavy scene, A-B-A drift 0.5%:
+
+    skip active            75.8 fps   13.19 ms
+    forced every frame     72.3 fps   13.83 ms      -> 0.64 ms
+
+The CSM cascades are NOT skipped: the camera moves continuously in an ARPG, so all three
+cascades are legitimately stale every frame.
+
+### An instrument note (third time this pattern appeared)
+
+Reading `light.shadow.needsUpdate` after a frame to check whether the skip engaged is
+worthless: with `autoUpdate === false` Three.js CLEARS `needsUpdate` after rendering, so it
+reads `false` whether or not the map was rebuilt. A sweep built on it reported "skip never
+engages" at every distance, which was the instrument, not the code. The behavioural test
+(render the same frame both ways, diff pixels) is what actually settled it. `reach` also
+read 16 mid-sweep and 6.5 at the end, because the 8 Hz pool reassigned the shadow slot
+during the test — another reason to pin the scene before measuring anything.
