@@ -4358,3 +4358,78 @@ regardless of order. The 2.32x overdraw is not depth-rejectable by reordering.
 Combined with the depth-prepass result (loses 1.63 ms once done correctly into the
 composer's buffer), overdraw is now a closed question on this renderer: it is real, and it
 is not recoverable without paying more in draw calls than it saves in fragments.
+
+
+# "Attacks feel like time dilation" — a unit bug in clock.js, not the GPU
+
+Reported as attacks being "time dilating slow". It was not frame rate. `clock.js` held the
+hitstop deadline in SIM time while simulation ran at the frozen scale, so the two
+multiplied: real freeze = requested / FROZEN_SCALE.
+
+Measured on the old code by emitting each duration and timing the real gap until the clock
+unfroze:
+
+    requested   30 ms ->  496 ms real   (16.5x)
+    requested   62 ms ->  963 ms real   (15.5x)
+    requested  124 ms -> 2082 ms real   (16.8x)
+    requested  210 ms -> 3473 ms real   (16.5x)   <- Ground Slam crit
+
+The ratio IS 1/0.06 = 16.67, the freeze scale. Every normal hit bought ~1 second of
+6%-speed slow motion; an AoE crit nearly 3.5 seconds.
+
+Worse, hitstop is emitted per impact and ENEMY hits emit it too. Standing in a ring of 12
+monsters with NO player input, hits arrive at 3.9/sec. On the old code that is:
+
+    3.9 hits/sec x 963 ms = 376% duty cycle
+
+i.e. the game demanded more freeze than there was real time to spend, and every new hit
+pushed the deadline further out. It could never catch up. That is the entire report.
+
+## Fix, in three parts
+
+1. **Deadline in REAL time** (`performance.now()`), which the freeze cannot dilate. 62 ms
+   now means 62 ms. Verified: 28->29, 42->49, 70->73 ms.
+2. **Durations cut ~3x** — reference 62 -> 28 ms, ceiling 210 -> 70 ms, floor 30 -> 14 ms,
+   crit multiplier 2.0 -> 1.5. Even correctly timed, 210 ms at 8 hits/sec is a fifth of
+   every second frozen. Reference ARPG hitstop is 20-80 ms. Freeze DEPTH also softened
+   0.06 -> 0.14, so it reads as a punch rather than a stall.
+3. **A leaky-bucket freeze budget** in the clock: refills at 7% of real time, banks up to
+   75 ms so one isolated slam always lands at full strength, and skips grants under 6 ms
+   (below one frame they are felt as a dropped frame, not seen as impact). The cap is
+   structural — total frozen time cannot exceed total granted time.
+
+Per-skill real freezes now (weight x severity, capped), from the live SKILLS table:
+
+    Ground Slam  w1.80   31 ms   crit 47      Storm Lance   w0.70   12 ms
+    Fireball     w1.15   20 ms   crit 30      Blink Step    w0.50    9 ms
+    Cleave       w1.00   17 ms   crit 26      Void Beam     w0.28    5 ms
+    Hex Seeker   w1.05   18 ms                Caustic Field w0.12    2 ms
+
+Beam and DoT field sit below one frame deliberately — a sustained channel must not stutter.
+
+## Result, same fight, 22 hits over 7.1 s
+
+    old code equivalent   7,130 ms frozen   101% duty cycle
+    shipped                 168 ms frozen   2.4% duty cycle
+
+Live 24-cast fight with real input, 20 kills: 197 ms granted, 0 ms clipped, 6% of frames
+frozen, click->impact p50 127 ms (which is Cleave's own 100 ms castTime, by design).
+
+## Two of my own measurement errors, both worth keeping
+
+**A "254 ms freeze against a 75 ms cap".** My first budget implementation set the deadline
+to `now + pending + grant`, re-banking the pending freeze that had ALREADY been paid for
+out of the bucket. Every chained hit re-added it. Fixed by extending from the existing
+deadline: `max(hitstopRealUntil, now) + grant`. Grants totalled 4% while the observed duty
+was 21.9% — that gap is what exposed it.
+
+**A "140 ms freeze" that was 8 ms.** Watching `clock.frozen` transition across frames
+cannot resolve a freeze shorter than a frame: at 14-40 ms frames, an 8 ms freeze is only
+observed as released on the NEXT frame. Sampling the DEADLINE instead gave the true
+distribution: min 6.2, p50 7.7, max 11.8 ms. Third time in this project that measuring a
+frame-boundary transition manufactured a fake result.
+
+Also corrected: an early per-skill table read `impact` off `World.combat.bar` entries,
+which do not carry it, so `weights` defaulted to 1 and all nine skills reported an
+identical 14 ms. The live path passes `skill.impact` from the SKILLS table (combat.js:450)
+and was always correct.

@@ -23,12 +23,24 @@ import { SKILLS, KEY_TO_SKILL, resolveSkill, TYPE_COLOR, BLOOD_COLOR } from './s
 const EV_ENEMY_ATTACK = 'combat:enemyAttack';
 
 // Impact tuning (config only exposes hitStopMs/critMultiplier; the rest live here).
-// hitStopMs (62) is the reference freeze for a "normal" solid hit. The curve floors
-// at HITSTOP_MIN so every real impact reads, ramps with damage severity, and a crit
-// multiplies by CRIT_HITSTOP (≈2×) — the perceptible "that one HURT" moment.
-const HITSTOP_MAX = 210;          // ms ceiling — a crit slam approaches this
-const HITSTOP_MIN = 30;           // ms — lightest impact still freezes perceptibly
-const CRIT_HITSTOP = 2.0;         // crit doubles the freeze (parent's explicit target)
+//
+// These are ~3x SHORTER than the values first shipped, for two reasons.
+//
+// 1. The clock had a unit bug (see core/clock.js): the freeze deadline was held in SIM
+//    time while sim ran at the frozen scale, so every duration here was multiplied by
+//    1/scale ≈ 16.5x in real time. A 62 ms "normal hit" froze for 963 ms and a 210 ms
+//    crit slam for 3,473 ms — measured. The clock now deadlines in real time.
+// 2. Even correctly timed, the old ceiling was too long for an ARPG. At 8+ hits/second in
+//    a pack, a 210 ms freeze consumes a fifth of every second; the game reads as heavy
+//    rather than responsive. Reference ARPG hitstop sits in the 20-80 ms band.
+//
+// Resulting real-time freezes (weight x severity ramp, capped):
+//     Cleave (w 1.00)        ~28 ms,  crit ~42 ms
+//     Ground Slam (w 1.80)   ~50 ms,  crit ~70 ms (at the cap — still THUMPS)
+//     Void Beam (w 0.28)     ~14 ms   (floor — sustained, never punchy)
+const HITSTOP_MAX = 70;           // ms ceiling — a crit slam lands here
+const HITSTOP_MIN = 14;           // ms — lightest impact still reads
+const CRIT_HITSTOP = 1.5;         // crit extends the freeze without stalling the fight
 const CRIT_SHAKE = 1.7;
 const SHAKE_MAX = 1.0;
 const DECAL_POOL = 28;

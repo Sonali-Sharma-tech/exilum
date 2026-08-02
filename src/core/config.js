@@ -125,7 +125,15 @@ export const CFG = {
   combat: {
     globalCooldown: 0.22,
     critMultiplier: 1.85,
-    hitStopMs: 62,          // freeze frames on impact — game feel
+    // 62 -> 28 ms. This is the REFERENCE freeze for a normal solid hit, scaled per skill
+    // and by damage severity in combat.js. Two independent reasons it came down:
+    //   - clock.js held the freeze deadline in SIM time while sim ran at the frozen
+    //     scale, so every value was ~16.5x longer in real time. Measured: 62 ms froze the
+    //     game for 963 ms, and a 210 ms crit slam for 3,473 ms. That bug is fixed, and it
+    //     was the "attacks feel like time dilation" report.
+    //   - even correct, 62 ms x 8 hits/second is half a second of freeze per second of
+    //     combat. 28 ms reads as a punch and leaves the fight responsive.
+    hitStopMs: 28,          // ms of near-freeze on a normal impact — real time, not sim
   },
   // maxActive 90 -> 30. MEASURED under live combat, which no previous round had done:
   //     11 live hostiles -> 14.4 fps      30 live hostiles -> 7.1 fps
