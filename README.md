@@ -3,6 +3,12 @@
 An isometric action RPG that runs in the browser. Three.js, no game engine, and **no art assets** —
 every texture, mesh, animation, and sound is generated procedurally at load time.
 
+**▶ Play it now, no download: [exilum.vercel.app](https://exilum.vercel.app)**
+
+Built with Dimension + Claude Opus 5 — one prompt fanned out into 14
+parallel subagents (rendering, procedural geometry, combat, loot, audio, VFX…), coordinating over
+an IRC channel and iterating against blind A/B comparisons with real Path of Exile 2 frames.
+
 ```bash
 npm install
 npm run dev        # http://localhost:5188
