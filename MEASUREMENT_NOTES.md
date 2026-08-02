@@ -4314,3 +4314,23 @@ engages" at every distance, which was the instrument, not the code. The behaviou
 (render the same frame both ways, diff pixels) is what actually settled it. `reach` also
 read 16 mid-sweep and 6.5 at the end, because the 8 Hz pool reassigned the shadow slot
 during the test — another reason to pin the scene before measuring anything.
+
+
+## `graphics.lightBudget` — the opt-in trade, default null (lossless)
+
+The one frame this optimisation cannot make fast is one that GENUINELY needs 28-34 lights:
+a dense fight with several spell VFX alive at once. Those lights all contribute, so
+discarding any of them is a real visual change, and the default never does.
+
+Worst frame the game can produce, measured with the roster pinned and a spell cast every
+240 ms so VFX lights never expire:
+
+    default (no cap)   34 of 34 in frustum   21.7 fps   46.08 ms   0 lights dropped
+    lightBudget: 20    ladder [12,16,20]     38.6 fps   25.91 ms   8.12 dropped/frame
+
++78% for 8 lights per frame, dimmest-first (ranked by intensity/dist^2, so a bright nearby
+flash always outranks a dim distant one). That is a real quality cost, which is exactly why
+it is off by default and why `stats.droppedInFrustum` is surfaced live on F3 — nobody should
+be able to take this trade without seeing what it costs.
+
+Capping also shortens the ladder, so fewer shader variants are prewarmed at boot.

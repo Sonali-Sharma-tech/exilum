@@ -116,6 +116,34 @@ tools/         frame analysers and capture harnesses
 are gitignored. They're Grinding Gear Games' material and not ours to redistribute — everything here
 was measured *against* them and contains none of them.
 
+## Performance
+
+Measured at 1568×1015 on a Retina display (DPR 2), rAF-clocked, real keyboard and mouse input:
+
+| | mean | p50 | p90 | p99 |
+|---|---|---|---|---|
+| exploration | **101 fps** | 100 | 96 | 89 |
+| combat, ≤16 lights in frustum | ~70 fps | — | — | — |
+| combat, 28–34 lights in frustum | 22–38 fps | — | — | — |
+
+Before this work the same exploration scene ran **42 fps**. The gain is point-light frustum
+culling (`src/render/lightcull.js`), and it is **pixel-identical** — 0 of 9,072,000 pixels differ
+across all seven rooms, because a `decay = 2` PointLight attenuates to exactly zero at its
+`distance` and culling one whose sphere misses the frustum is arithmetic, not approximation.
+
+**Ambient occlusion is on** (it had been silently disabled by a `medium` quality default) and
+**nothing is ever dropped by default** — `F3` shows `lights dropped`, which reads 0.
+
+The floor case is a dense fight with several spell VFX alive at once, where 28–34 lights are
+genuinely in frustum. Every one contributes, so the default keeps them all. If your GPU needs the
+headroom, set `graphics.lightBudget` in `src/core/config.js` (try `20`): +78% in that frame, at a
+measured 8.1 dimmest lights dropped per frame.
+
+**These numbers are a floor, not a forecast.** They come from a headless software rasteriser
+(SwiftShader) with no GPU, and the per-light cost is **100% fragment work** — 0.585 ms/light at
+full resolution, 0.087 at quarter resolution, fixed CPU component ~0. That is precisely the work
+a real GPU spreads across hundreds of cores.
+
 ## Docs
 
 - **`MEASUREMENT_NOTES.md`** — the full record. Every metric, confound, and correction.

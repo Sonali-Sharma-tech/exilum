@@ -121,7 +121,20 @@ import { CFG } from '../core/config.js';
 //     demand 21..24  -> rung 24   (21.37 ms)
 //     demand 25..28  -> rung 28
 //     demand   > 28  -> lowest-irradiance in-frustum lights dropped, counted in stats
-const RUNGS = [12, 16, 20, 24, 28, 34];
+const ALL_RUNGS = [12, 16, 20, 24, 28, 34];
+
+// The ladder actually in use. Equals ALL_RUNGS unless `CFG.graphics.lightBudget` caps it.
+//
+// The cap exists because the honest limit of this optimisation is a scene that genuinely
+// puts 28-34 lights in frustum — a dense fight with several spell VFX alive at once. Those
+// lights all contribute, so dropping them IS a visual change and the default never does it.
+// Measured cost of the top rungs on software GL: ~1.6 ms per light above 16, so a 34-light
+// frame is ~21 ms where a 16-light frame is ~10.5 ms.
+//
+// Set `lightBudget` (e.g. 20) to trade the dimmest lights of a heavy fight for frame rate.
+// `stats.droppedInFrustum` counts exactly what it costs, and F3 shows it live, so the trade
+// is never silent. null = no cap = lossless.
+let RUNGS = ALL_RUNGS.slice();
 
 // NO hysteresis. An earlier version held the rung high after a spike (DOWN required
 // demand to fit a lower rung for N consecutive frames) on the assumption that rung
@@ -348,6 +361,15 @@ export default {
   init(ctx) {
     scene = ctx.scene; camera = ctx.camera; renderer = ctx.renderer;
     enabled = CFG.graphics.lightCull !== false;
+    // Apply the optional budget cap. Rungs above it are removed entirely, so they are
+    // never prewarmed and never reached — the shader variant count falls with the cap.
+    const cap = CFG.graphics.lightBudget;
+    if (Number.isFinite(cap) && cap > 0) {
+      RUNGS = ALL_RUNGS.filter((r) => r <= cap);
+      if (!RUNGS.length) RUNGS = [ALL_RUNGS[0]];   // never leave the ladder empty
+    } else {
+      RUNGS = ALL_RUNGS.slice();
+    }
     dirty = true;
     World.lightCull = api;
   },

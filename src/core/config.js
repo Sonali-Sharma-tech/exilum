@@ -96,6 +96,21 @@ export const CFG = {
     // at 47.1 -> 96.6 fps. See src/render/lightcull.js for the full derivation and
     // the count-ladder that keeps Three.js from recompiling every material.
     lightCull: true,
+    // Optional cap on the point-light budget. null = NO CAP = lossless, which is the
+    // default and what every measurement above was taken with.
+    //
+    // The one case the cull cannot make fast is a frame that GENUINELY needs 28-34 lights:
+    // a dense fight with several spell VFX alive at once. Those lights all contribute, so
+    // discarding them is a real visual change and the default never does it. Cost of the
+    // top of the ladder on software GL is ~1.6 ms per light above 16 (a 34-light frame is
+    // ~21 ms vs ~10.5 ms at 16), and a real GPU pays a small fraction of that — the
+    // per-light cost is 100% fragment work (0.585 ms/light at full res, 0.087 at quarter
+    // res, fixed CPU component ~0), which is exactly what a GPU parallelises.
+    //
+    // Set a number (20 is a good first try) to cap it. Above the cap the LOWEST-irradiance
+    // in-frustum lights are dropped — dimmest first, so a bright nearby flash always
+    // survives — and F3 reports `lights dropped` live so the trade is never silent.
+    lightBudget: null,
   },
   world: {
     tile: 4,               // metres per dungeon cell
