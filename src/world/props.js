@@ -520,18 +520,53 @@ function initLightPool() {
   }
 }
 
-let _order = null, _dist = null;
+let _order = null, _dist = null, _inFov = null;
+const _fr = new THREE.Frustum();
+const _fm = new THREE.Matrix4();
+const _fs = new THREE.Sphere();
 function reassignLights() {
   const cam = World.camera; if (!cam) return;
   cam.getWorldPosition(_cam);
   const n = lightSources.length;
-  if (!_order || _order.length !== n) { _order = new Int32Array(n); _dist = new Float32Array(n); }
-  for (let i = 0; i < n; i++) { const s = lightSources[i]; const dx = s.x - _cam.x, dy = s.y - _cam.y, dz = s.z - _cam.z; _dist[i] = dx * dx + dy * dy + dz * dz; _order[i] = i; }
-  // partial selection of nearest maxLights (insertion into a small window)
+  if (!_order || _order.length !== n) {
+    _order = new Int32Array(n); _dist = new Float32Array(n); _inFov = new Uint8Array(n);
+  }
+  // Rank by VISIBILITY first, distance second.
+  //
+  // Distance-to-camera alone is the wrong key for an isometric follow-cam: the camera
+  // sits ~21 world units BEHIND and above the player, so a brazier behind the camera is
+  // frequently nearer to it than one the player is walking toward. Those win pool slots
+  // and light nothing on screen.
+  //
+  // Measured at 7 room centres before this change: in `entry` 4 of 4 on-screen flames and
+  // in `nave` 3 of 3 had NO pooled light within 3 world units — visibly unlit fire, with
+  // pool slots spent behind the camera. (Also wasteful now that lightcull.js culls
+  // out-of-frustum lights: a slot spent behind the camera is culled and pads a rung.)
+  let hasFrustum = false;
+  if (Number.isFinite(cam.projectionMatrix.elements[0])) {
+    cam.updateMatrixWorld();
+    _fm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    hasFrustum = true;
+    for (let i = 0; i < 16; i++) if (!Number.isFinite(_fm.elements[i])) { hasFrustum = false; break; }
+    if (hasFrustum) _fr.setFromProjectionMatrix(_fm);
+  }
+  for (let i = 0; i < n; i++) {
+    const s = lightSources[i];
+    const dx = s.x - _cam.x, dy = s.y - _cam.y, dz = s.z - _cam.z;
+    _dist[i] = dx * dx + dy * dy + dz * dz; _order[i] = i;
+    if (hasFrustum) {
+      _fs.center.set(s.x, s.y, s.z); _fs.radius = s.range || 8;
+      _inFov[i] = _fr.intersectsSphere(_fs) ? 1 : 0;
+    } else _inFov[i] = 1;
+  }
+  // Partial selection of the best `maxLights`: in-frustum outranks out, then nearest.
   const m = Math.min(P.maxLights, n);
   for (let a = 0; a < m; a++) {
     let best = a;
-    for (let b = a + 1; b < n; b++) if (_dist[_order[b]] < _dist[_order[best]]) best = b;
+    for (let b = a + 1; b < n; b++) {
+      const ib = _order[b], ibest = _order[best];
+      if (_inFov[ib] !== _inFov[ibest] ? _inFov[ib] > _inFov[ibest] : _dist[ib] < _dist[ibest]) best = b;
+    }
     const t = _order[a]; _order[a] = _order[best]; _order[best] = t;
   }
   const t = World.time || 0;

@@ -4072,3 +4072,203 @@ that canvas coordinates equal screen coordinates. Agreement between three instru
 assumption is not corroboration; it is the same measurement taken three times.
 
 **The user's screenshot was the only ground truth in the room, and I argued with it for two rounds.**
+
+
+# Performance round: 24-30 fps -> 101 fps exploration, pixel-identical
+
+The ask was 60 fps minimum, 100 preferred, with NO loss of quality, features or visuals.
+
+## What the frame was actually spending
+
+Profiled per-system inside the engine loop, then split scene vs post, then split
+per-pixel vs fixed. Every number rAF-clocked at 1440x900.
+
+    all 14 systems' JS (frame+fixed)     0.45 ms   <- AI 0.13, HUD 0.14
+    whole post chain (5 passes)          1.47 ms
+    RenderPass (the scene)              14.08 ms
+    harness ceiling (bare rAF)           8.00 ms
+
+So JS was irrelevant and the post stack was nearly free. Resolution scaling gave the
+decisive split -- ms fitted against s^2:
+
+    scale 1.00 / 0.75 / 0.50 / 0.35  ->  22.08 / 14.25 / 8.26 / 8.12 ms
+    fit: 16.72 ms per-pixel, 5.09 ms fixed   => FRAGMENT-BOUND
+
+## The lever: 47 PointLights, most contributing exactly nothing
+
+Three.js forward-renders, unrolling every visible PointLight into every lit fragment.
+Cost tracks the light COUNT, not screen coverage:
+
+    visible point lights   47    24    16    12     9
+    frame (ms)          35.46 13.00  9.94  9.91  8.38
+
+A PointLight with decay=2 and finite `distance = d` attenuates by
+`pow(saturate(1 - pow(dist/d,4)),2) / max(dist^2,eps)` -- **exactly zero** past d. So a
+light whose influence sphere misses the frustum cannot change any pixel. At spawn, 14 of
+23 live lights were in that category: `skylight-arena` has reach 28.1 and sat 98.3 world
+units away; a brazier with reach 7.0 sat 31.6 away.
+
+Verified rather than argued. Engine frozen, `World.time` pinned, same frame rendered both
+ways, PNGs decoded and compared byte-for-byte -- at all SEVEN rooms:
+
+    entry nave crypt cistern courtyard collapsed arena
+    0 differing pixels of 1,296,000 each.  9,072,000 total.  max channel delta 0/255.
+
+Shipped result, rAF-clocked A-B-A with the roster pinned:
+
+    cull OFF  42.1 fps  23.75 ms   (23 lights)
+    cull ON  101.7 fps   9.83 ms   (12 lights, 9 in frustum)   2.42x, -13.92 ms
+
+## Quality went UP, not down
+
+`QUALITY = { level: 'medium' }` was shipped last round from SwiftShader numbers, and
+`medium` DISABLES GTAO and the contact-AO term -- ambient occlusion was absent from the
+shipped game. Restored to `ultra`:
+
+    medium (no AO)  120.1 fps      ultra (AO on)  109.0 fps
+    AO costs 0.84 ms against a 13.92 ms saving. Ultra is now 2.3x faster than medium was.
+
+## Five things I got wrong, and what disproved each
+
+**1. "Shadows are the cost."** `shadowMap.autoUpdate = false` measured +3.8%, which looked
+real until I counted render calls: `renderCallsPerFrame: 20` in BOTH legs. The ablation
+was a no-op (Three.js renders shadows inside `renderer.render`), so +3.8% was noise.
+
+**2. "Merged level-spanning geometry is the cost."** `kit-wallAshlar` is one
+41,052-triangle mesh spanning 126.5 x 91.6 -- the whole dungeon, so its bounding box always
+intersects the frustum and `frustumCulled` does nothing. Hiding it saved **-0.36 ms**.
+All five level-spanning meshes together: **-0.31 ms**. Chunking them would have gained
+nothing. (Hiding all 140 opaque meshes saves 12.87 ms; the cost is per-pixel lighting,
+not geometry.)
+
+**3. "Transparent overdraw is the cost."** 476 of 625 materials are transparent with
+depthWrite:false. Hiding ALL of them: 1.67 ms. Hiding the 112 at opacity 0.00: **-0.08 ms**.
+
+**4. "A depth prepass will pay."** Overdraw measured 2.32x by additive-blend fragment
+counting, and the prepass reported 46.7 -> 120 fps, saving 12.48 ms -- MORE than the
+theoretical maximum for 2.32x on a 12.87 ms pass. The pixel diff caught it: 90.7% of pixels
+differed and the entire dungeon was gone. I had rendered depth to the CANVAS while the
+composer's RenderPass renders into its OWN framebuffer with freshly-cleared depth, so
+`EqualDepth` rejected every fragment. The "win" was an empty screen. Done correctly into
+the composer's buffer it LOSES 1.63 ms -- 149 extra draw calls cost more than 2.32x
+overdraw saves on a CPU rasteriser.
+
+**5. "Rung changes are expensive, so add hysteresis."** I asserted this and never measured
+it. A direct test cycled 64 rung changes in 64 consecutive frames: 30.7 ms worst frame,
+zero frames over 50 ms. Holding the rung was actively harmful -- combat spikes arrive faster
+than any hold expires, so it PINNED the expensive rung:
+
+    5 rungs, no hold    mean 60.6 fps   dropped 29
+    5 rungs, hold 45    mean 52.2 fps   dropped 287
+    7 rungs, hold 45    mean 29.4 fps   dropped 0
+    4 rungs, hold 20    page hung outright
+    2 rungs, hold 20    page hung outright
+
+## Two real bugs found while chasing stalls
+
+**`PCFSoftShadowMap` is deprecated in three 0.185.** `WebGLShadowMap.render()` warns,
+silently rewrites `type` to `PCFShadowMap`, AND -- because the shadow sampler type changes --
+walks the whole scene setting `material.needsUpdate` on EVERY material. So asking for
+PCFSoft bought exactly PCF plus a guaranteed full-scene recompile. Caught with a setter
+tripwire installed on `shadowMap.type` before boot; the single write recorded was
+`from 2 to 1` inside `WebGLShadowMap.render`, called from my own prewarm. Boot programs
+358 -> 296.
+
+**My own culler rendered frames at un-prewarmed light counts.** Parked pool slots
+(intensity ~0) still count toward Three.js's light total, and I was skipping them without
+touching `visible`. Measured over 227 combat frames: 4 rendered at 25, 24 and 32 lights
+instead of the chosen rung, and those frames cost up to 433 ms each. Fixed by making the
+cull own parked slots too; `stats.offRung` now asserts it, and reads 0.
+
+## Why the count is quantised at all
+
+Three.js keys its program cache on the light count, so a free-running exact cull walks the
+count continuously and recompiles every material at each new value. Measured over a
+12-second walk: programs 66 -> 254, **worst frame 4,295 ms, mean 1.1 fps**. Prewarming
+every count 0..32 costs 11.2 s and 1,531 programs, so that is out. Five rungs
+[12,16,20,24,28,34] are prewarmed at boot in ~0.9 s; padding uses out-of-frustum lights,
+which contribute zero, so a padded frame is still pixel-identical.
+
+Ceiling: raising the top rung 28 -> 34 was measured, not assumed, and it went the opposite
+way to my prediction --
+
+    ceiling 28   mean 45.5 fps   p50 46.9   p90 26.7   dropped 305
+    ceiling 34   mean 64.6 fps   p50 75.2   p90 50.3   dropped 0
+
+-- because the 34 rung is reached in only 45 of 2326 frames, while a 28 ceiling drops real
+lights on every heavy frame.
+
+## An instrument that produced a plausible false answer twice
+
+Timing `pipeline.render()` in a tight synchronous loop on a frozen scene reported **6.26 ms
+for a frame that measures 21 ms under rAF**, and made culling look 4% SLOWER. Adding
+`gl.finish()` did not fix it -- SwiftShader's worker threads finish after the call returns.
+Any conclusion from that timer is void, including a "forceSinglePass saves 0.55 ms"
+reading. Only rAF-clocked numbers are used above.
+
+## What is honestly not fixed
+
+Combat p90/p99 still fall below 60 fps HERE: 26-50 fps p90 depending on how many lights
+the fight genuinely puts in frustum (peak demand 31). That is not a defect in the cull --
+`droppedInFrustum` is 0 -- it is the cost of shading 20-34 lights per pixel.
+
+The per-light cost is **100% fragment work**, which is the load-bearing fact for real
+hardware. Measured by re-running the light sweep at quarter pixels:
+
+    ms per light at full res   0.585
+    ms per light at 1/4 pixels 0.087        (fixed CPU component: -0.079, i.e. zero)
+
+A CPU rasteriser pays full price for exactly the work a GPU does in parallel across
+hundreds of cores. These numbers are a floor, not a forecast.
+
+First-fight program growth is also real and bounded: fight 1 compiles ~91 programs
+(worst frame 365 ms), fight 2 compiles 5. A warm-up, not a leak. Forcing every mesh
+visible during prewarm to link them early did NOT help (143 vs 91) and was reverted.
+
+
+## Two further fixes the cull exposed
+
+**The brazier pool was ranking by distance to CAMERA, ignoring the frustum.** An isometric
+follow-cam sits ~21 world units behind and above the player, so a brazier BEHIND the camera
+is routinely nearer to it than one the player is walking toward. Those won pool slots and
+lit nothing on screen. Measured at all 7 room centres by projecting every emissive flame
+instance and asking whether any live PointLight sat within 3 world units:
+
+    before   entry 4 of 4 on-screen flames unlit   nave 3 of 3 unlit   total 7 of 19
+    after    0 of 19 unlit, in every room
+
+Fix: rank in-frustum sources above out-of-frustum, then by distance. Same 12 slots, spent
+on braziers you can actually see. This is a VISUAL improvement, and it also stops the cull
+wasting rung capacity on lights it will immediately discard. Runs at reassignHz 8, so the
+added frustum test is negligible.
+
+**The prewarm was warming the wrong colour space.** `outputColorSpace` is part of Three.js's
+program cache key and differs by render TARGET: the canvas is `srgb`, the composer's
+intermediate targets are `srgb-linear`. prewarm() called `renderer.render(scene, camera)`
+straight to the canvas, so every material was compiled for a colour space the game never
+renders in, and the real program still compiled on first sight in play.
+
+Found by diffing cache keys FIELD BY FIELD after a fight (the same technique that caught the
+shadow bug): of 135 fresh keys, 12 differed only at field 2 — `srgb` vs `srgb-linear` — and
+80 only at field 40, the point-light count. Routing prewarm through `World.pipeline.render()`:
+
+    first-fight program growth  183 -> 45      worst frame  427 ms -> 186 ms
+    boot programs               296 -> 431     boot prewarm 0.83 s -> 2.13 s (behind curtain)
+
+Second fight compiles 6 programs, so the remainder is genuinely one-time warm-up.
+
+## Shipped state
+
+    src/render/lightcull.js   new — frustum cull + prewarmed rung ladder [12,16,20,24,28,34]
+    src/core/config.js        graphics.lightCull: true; QUALITY 'medium' -> 'ultra'
+    src/core/engine.js        PCFSoftShadowMap -> PCFShadowMap (deprecated; forced a recompile)
+    src/world/props.js        brazier pool ranks in-frustum first
+    src/ui/debug.js           F3 shows `lights shown/inFrustum @rung` and `lights dropped`
+    src/main.js               registers lightcull LAST; prewarms rungs at boot
+
+Verified on the shipped tree, rAF-clocked, real keyboard/mouse input:
+
+    exploration   111.9 fps mean   p50 111   p90 107   p99 94   worst 21.3 ms
+    cull A-B-A     42.1 -> 101.7 fps (2.42x, -13.92 ms), return drift 15.9% vs 122% effect
+    losslessness   0 differing pixels of 9,072,000 across all 7 rooms
+    integrity      droppedInFrustum 0, offRung 0, 0 JS errors, ultra + AO on

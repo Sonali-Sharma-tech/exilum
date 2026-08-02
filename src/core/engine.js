@@ -25,7 +25,17 @@ export class Engine {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = CFG.graphics.exposure;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // PCFShadowMap, not PCFSoftShadowMap. In three 0.185 PCFSoftShadowMap is DEPRECATED:
+    // WebGLShadowMap.render() warns, silently rewrites `type` to PCFShadowMap, and — because
+    // the shadow sampler type changes — walks the whole scene setting `material.needsUpdate`
+    // on EVERY material. So asking for PCFSoft bought exactly PCF plus a guaranteed
+    // full-scene shader recompile on the first shadow render.
+    //
+    // Caught by installing a setter tripwire on `shadowMap.type` before boot; the single
+    // write recorded was `from 2 to 1` inside WebGLShadowMap.render. Naming the type we
+    // actually get removes the recompile and the deprecation warning, and changes no pixels
+    // (it was already rendering as PCF from the first shadowed frame onward).
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.shadowMap.autoUpdate = true;
     this.renderer = renderer;
 

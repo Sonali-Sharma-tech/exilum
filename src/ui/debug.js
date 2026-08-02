@@ -12,6 +12,16 @@ export class DebugOverlay {
     for (const [k, label] of [
       ['fps', 'fps'], ['ft', 'frame'], ['calls', 'draws'], ['tris', 'tris'],
       ['ent', 'entities'], ['part', 'particles'], ['geo', 'geometries'], ['tex', 'textures'],
+      // Point-light budget. `lights` is the single best predictor of a slow frame: the
+      // scene is fragment-bound and Three.js unrolls EVERY visible PointLight into every
+      // lit fragment, so cost tracks this count (measured ~1.6 ms per light above 16 on
+      // software GL). Reads "shown/inFrustum @rung".
+      //   shown      lights actually submitted — always exactly the rung
+      //   inFrustum  lights that could affect a visible pixel (the real demand)
+      //   rung       quantised count, held on a prewarmed value to avoid recompiles
+      // `drop` is the one alarming number: >0 means demand exceeded the top rung and a
+      // CONTRIBUTING light was discarded, i.e. a visible quality loss. It should read 0.
+      ['lights', 'lights'], ['drop', 'lights dropped'],
     ]) {
       const r = el('div', 'd-row', this.box);
       el('span', 'd-k', r).textContent = label;
@@ -54,6 +64,16 @@ export class DebugOverlay {
     set('ent', String(ents));
 
     set('part', String(readParticles()));
+
+    const lc = World.lightCull && World.lightCull.stats;
+    if (lc) {
+      set('lights', `${lc.shown}/${lc.inFrustum} @${lc.rung}`);
+      // Accumulates, so any drop that ever happened stays visible rather than flickering
+      // past between two 5 Hz samples.
+      set('drop', lc.droppedInFrustum > 0 ? `${lc.droppedInFrustum} THIS FRAME` : '0');
+      const dCls = lc.droppedInFrustum > 0 ? ' bad' : '';
+      if (this.rows.drop.className !== 'd-v' + dCls) this.rows.drop.className = 'd-v' + dCls;
+    }
 
     this._acc = 0; this._frames = 0; this._ftSum = 0; this._ftPeak = 0;
   }

@@ -79,12 +79,29 @@ A few examples of what that turned up:
   CSS size, and a canvas's attributes are its intrinsic size, so on a Retina display it rendered 2×
   too large and you saw the top-left quarter. Three of my own tests agreed it was centred — all three
   measured canvas space, not screen space.
+- **2.4× came from lights that were mathematically contributing nothing.** A PointLight with
+  `decay = 2` attenuates to *exactly* zero at its `distance`, so one whose influence sphere misses
+  the frustum cannot alter a pixel — `skylight-arena` has reach 28.1 and sat 98.3 world units away.
+  14 of 23 were like that. Culling them: **42 → 102 fps, and 0 of 9,072,000 pixels differ** across
+  all seven rooms. The catch is that Three.js keys its shader cache on the light count, so a
+  free-running cull recompiled every material continuously — **worst frame 4,295 ms**. Quantising to
+  five prewarmed rungs fixes it.
+- **A depth prepass reported a 12.5ms win that was an empty screen.** Overdraw genuinely measures
+  2.32×, and the prepass "saved" more than 2.32× could possibly yield — the tell. The pixel diff
+  found 90.7% of pixels changed and the whole dungeon missing: depth went to the canvas while the
+  composer renders into its own framebuffer, so `EqualDepth` rejected everything. Done correctly it
+  *loses* 1.6ms.
+- **`PCFSoftShadowMap` is deprecated in three 0.185** — it silently becomes `PCFShadowMap` *and*
+  sets `needsUpdate` on every material in the scene. Asking for the nicer filter bought the same
+  filter plus a guaranteed full-scene recompile. Found with a setter tripwire on `shadowMap.type`.
+- **Ambient occlusion was switched off in the shipped build** and nobody noticed: a `medium` quality
+  default disabled GTAO to buy frame rate. It's back on, and 2.3× faster than `medium` used to be.
 
 ## Layout
 
 ```
 src/core/      engine, fixed-step clock, input, physics, collision, spatial hash, ragdoll
-src/render/    renderer pipeline, sky + lighting, camera, wall cutaway, shaders
+src/render/    renderer pipeline, sky + lighting, camera, wall cutaway, light culling, shaders
 src/world/     dungeon generator, level builder, props, terrain, decals
 src/entity/    player rig, skeletal animation
 src/combat/    damage model, skills, projectiles, particles, VFX

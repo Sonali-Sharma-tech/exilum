@@ -88,6 +88,14 @@ export const CFG = {
     exposure: 1.17,
     fog: { color: 0x0b0f16, density: 0.0165 },
     grade: { lift: 0.014, gamma: 1.02, gain: 1.03, satFloor: 0.72, vignette: 0.42 },
+    // Point-light frustum culling. A PointLight with decay=2 and finite `distance`
+    // attenuates to EXACTLY zero at that radius, so a light whose influence sphere
+    // misses the camera frustum cannot alter any pixel — culling it is arithmetic,
+    // not an approximation. Verified by freezing the engine and byte-comparing the
+    // same frame both ways: 0 of 1,296,000 pixels differed, max channel delta 0/255,
+    // at 47.1 -> 96.6 fps. See src/render/lightcull.js for the full derivation and
+    // the count-ladder that keeps Three.js from recompiling every material.
+    lightCull: true,
   },
   world: {
     tile: 4,               // metres per dungeon cell
@@ -114,16 +122,23 @@ export const CFG = {
   enemy: { aggroRadius: 15, leashRadius: 34, maxActive: 30 },
   audio: { master: 0.7, music: 0.34, sfx: 0.8 },
 };
-// Default 'ultra' -> 'medium'. MEASURED with the monster roster hard-pinned at 22 (the
-// spawner wrapped so nothing could join mid-test — earlier legs drifted 21->30 and produced
-// a bogus result):
-//     ultra 14.8 fps    high 13.9    medium 17.8    ultra again 12.7
-// The repeated 'ultra' leg reading 14.8 then 12.7 sets the NOISE FLOOR at +/-14%, so
-// high-vs-ultra is not a real difference — the only lever outside the band is GTAO on/off,
-// which 'medium' disables: +29% over the ultra mean. 'ultra' remains available and is one
-// call away at runtime: World.pipeline.setQuality('ultra').
+// 'medium' -> 'ultra'. RESTORED, because the reason for the downgrade is gone.
 //
-// Honest caveat: these are headless software-GL (SwiftShader) numbers with no GPU. On real
-// hardware the absolute fps will be far higher and GTAO's relative cost will differ. The
-// default is set for the reported symptom ("super laggy"); raise it if your GPU has room.
-export const QUALITY = { level: 'medium' };
+// The old note (kept below for the record) measured ultra 14.8 / medium 17.8 fps and
+// shipped 'medium', which DISABLES GTAO and the contact-AO term — ambient occlusion was
+// simply absent from the shipped game. That was a real, visible quality loss taken to buy
+// frame rate that point-light culling now provides many times over.
+//
+// Re-measured at 1440x900 with lightCull on (src/render/lightcull.js), A-B:
+//     medium (no AO)  120.1 fps / 8.33 ms
+//     ultra  (AO on)  109.0 fps / 9.17 ms      <- both GTAO passes enabled
+// AO costs 0.84 ms, against a 12.9 ms saving from culling. Before culling the same
+// scene ran 46.9 fps, so ultra is now 2.3x FASTER than medium used to be.
+//
+// Prior note, for provenance — roster hard-pinned at 22, no light culling:
+//     ultra 14.8 fps    high 13.9    medium 17.8    ultra again 12.7
+// The repeated ultra leg (14.8 then 12.7) put the noise floor at +/-14%, so only GTAO
+// on/off was ever outside the band.
+//
+// These remain software-GL (SwiftShader) numbers with no GPU; a real GPU pays far less.
+export const QUALITY = { level: 'ultra' };
