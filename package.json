@@ -1,0 +1,29 @@
+{
+  "name": "sunderfall",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5188 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --port 5189 --strictPort"
+  },
+  "dependencies": {
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "vite": "^8.2.0"
+  },
+  "description": "An isometric action RPG in the browser. Three.js, zero art assets \u2014 every texture, mesh, animation and sound generated procedurally.",
+  "license": "MIT",
+  "author": "Sonali Sharma",
+  "keywords": [
+    "game",
+    "arpg",
+    "threejs",
+    "webgl",
+    "procedural-generation",
+    "isometric",
+    "browser-game"
+  ]
+}

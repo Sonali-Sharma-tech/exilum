@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+
+# ── Reference material — DELIBERATELY NOT PUBLISHED ────────────────────────────
+# refs/ holds Path of Exile 2 press screenshots used as measurement targets during
+# development. They are Grinding Gear Games' copyrighted material and are not ours to
+# redistribute, so they stay local. Everything in this repo was measured AGAINST them;
+# none of it contains them.
+refs/
+
+# Capture output and blind-comparison pairs. Generated artefacts (hundreds of MB of PNGs),
+# and the blind pairs embed copies of the reference frames above.
+shots/
+blind/
+blind13/
+blind14/
+blind14c/
+_crit_crops/

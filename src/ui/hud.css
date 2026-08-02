@@ -1,0 +1,398 @@
+/* EXILIUM HUD — dark gothic, gold-on-black. Every panel is forged, not carded.
+   Animation uses transform/opacity only (compositor). No border-radius card look. */
+
+#hud-root {
+  position: absolute; inset: 0; pointer-events: none;
+  color: #cdbb8e;
+  font-family: "Trajan Pro", "Cinzel", Georgia, serif;
+  --gold: #c9a227; --gold-lite: #f0d97a; --gold-deep: #6b5518;
+  --ink: #05060a; --panel: #0b0c11; --edge: #2a2c34; --text: #cdbb8e; --dim: #8b8266;
+  user-select: none; -webkit-user-select: none;
+  text-rendering: optimizeLegibility;
+}
+#hud-root * { pointer-events: none; }
+#hud-root .clickable { pointer-events: auto; cursor: none; }
+
+/* ── Forged panel base: iron plate, beveled gold edge, inner shadow ────── */
+.forged {
+  position: absolute;
+  background:
+    linear-gradient(180deg, rgba(30,26,18,.55), rgba(8,9,13,.86)),
+    var(--tex-iron) repeat;
+  background-blend-mode: overlay, normal;
+  border: 1px solid #000;
+  box-shadow:
+    inset 0 0 0 1px rgba(201,162,39,.30),
+    inset 0 1px 0 rgba(240,217,122,.14),
+    inset 0 -14px 30px rgba(0,0,0,.66),
+    0 4px 22px rgba(0,0,0,.72);
+}
+.forged::before, .forged::after {
+  content: ''; position: absolute; width: 22px; height: 22px; pointer-events: none;
+  border: 2px solid var(--gold); opacity: .72;
+  filter: drop-shadow(0 0 3px rgba(201,162,39,.45));
+}
+.forged::before { top: -2px; left: -2px; border-right: 0; border-bottom: 0;
+  border-image: linear-gradient(135deg, var(--gold-lite), transparent 70%) 1; }
+.forged::after  { bottom: -2px; right: -2px; border-left: 0; border-top: 0;
+  border-image: linear-gradient(315deg, var(--gold-lite), transparent 70%) 1; }
+
+/* Corner flourish SVGs stamped on titled panels */
+.flourish { position: absolute; width: 30px; height: 30px; opacity: .8; }
+.flourish.tl { top: 3px; left: 3px; }
+.flourish.tr { top: 3px; right: 3px; transform: scaleX(-1); }
+.flourish.bl { bottom: 3px; left: 3px; transform: scaleY(-1); }
+.flourish.br { bottom: 3px; right: 3px; transform: scale(-1,-1); }
+
+.panel-title {
+  position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+  padding: 2px 20px; font-size: 12px; letter-spacing: .28em; text-transform: uppercase;
+  color: var(--gold-lite);
+  background: linear-gradient(180deg, #16130b, #06070a);
+  border: 1px solid var(--gold-deep);
+  box-shadow: 0 0 12px rgba(0,0,0,.8), inset 0 0 6px rgba(201,162,39,.2);
+  text-shadow: 0 0 8px rgba(201,162,39,.5);
+  white-space: nowrap;
+}
+
+/* ── Orbs ──────────────────────────────────────────────────────────────── */
+.orb { position: absolute; bottom: 12px; }
+.orb.life { left: 18px; }
+.orb.mana { right: 18px; }
+.orb canvas, .orb svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.orb .orb-liquid { z-index: 1; }
+.orb .orb-frame  { z-index: 2; pointer-events: none; }
+.orb .orb-val {
+  position: absolute; left: 0; right: 0; bottom: 6%; z-index: 3; text-align: center;
+  font-size: 15px; letter-spacing: .06em; color: #f3e6c2;
+  text-shadow: 0 0 5px #000, 0 1px 2px #000, 0 0 10px rgba(0,0,0,.9); pointer-events: none;
+}
+.orb.lowlife { animation: lowpulse 1.05s ease-in-out infinite; }
+@keyframes lowpulse { 0%,100% { filter: none; } 50% { filter: drop-shadow(0 0 14px rgba(184,31,36,.9)); } }
+
+/* ── Skill bar ─────────────────────────────────────────────────────────── */
+#skillbar {
+  position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 6px; padding: 8px 12px 10px;
+}
+.skill {
+  position: relative; width: 54px; height: 54px; background: #07080c;
+  border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(201,162,39,.35), inset 0 -8px 16px rgba(0,0,0,.7), 0 2px 8px rgba(0,0,0,.7);
+}
+.skill canvas { position: absolute; inset: 3px; width: calc(100% - 6px); height: calc(100% - 6px); }
+.skill .cd-svg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
+.skill .key {
+  position: absolute; bottom: 1px; right: 2px; z-index: 3;
+  font-size: 10px; letter-spacing: .04em; color: var(--gold-lite);
+  text-shadow: 0 0 3px #000, 0 1px 1px #000; font-weight: 700;
+}
+.skill .mana-cost {
+  position: absolute; top: 1px; left: 3px; z-index: 3; font-size: 9px; color: var(--mana-lite, #63b6ff);
+  text-shadow: 0 0 3px #000, 0 1px 1px #000;
+}
+.skill.no-mana { filter: grayscale(.55) brightness(.62); }
+.skill.no-mana .mana-cost { color: #ff5a4e; }
+.skill.locked { filter: grayscale(1) brightness(.4); }
+.skill .cd-text {
+  position: absolute; inset: 0; z-index: 4; display: flex; align-items: center; justify-content: center;
+  font-size: 17px; color: #fff; text-shadow: 0 0 6px #000, 0 2px 3px #000; opacity: 0;
+}
+.skill.cooling .cd-text { opacity: 1; }
+.skill .flash {
+  position: absolute; inset: 0; z-index: 5; background: radial-gradient(circle, rgba(240,217,122,.6), transparent 70%);
+  opacity: 0; pointer-events: none;
+}
+
+/* ── XP bar ────────────────────────────────────────────────────────────── */
+#xpbar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 7px;
+  background: linear-gradient(180deg, #08090d, #030407);
+  box-shadow: inset 0 1px 0 rgba(201,162,39,.2), inset 0 4px 8px rgba(0,0,0,.8);
+  overflow: hidden;
+}
+#xpbar .xp-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 100%;
+  transform-origin: left center; transform: scaleX(0);
+  background: linear-gradient(180deg, #7b2a86, #b04ec6 45%, #d98cf0);
+  box-shadow: 0 0 10px rgba(176,78,198,.75);
+  will-change: transform;
+}
+#xpbar .xp-seg {
+  position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(0,0,0,.7);
+  box-shadow: 1px 0 0 rgba(201,162,39,.12);
+}
+#xpbar .xp-shine {
+  position: absolute; top: 0; bottom: 0; width: 90px; opacity: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.85), transparent);
+  transform: translateX(-120px); will-change: transform, opacity;
+}
+#xplevel {
+  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+  font-size: 11px; letter-spacing: .22em; color: var(--gold-lite);
+  text-shadow: 0 0 6px #000, 0 0 3px rgba(201,162,39,.6); text-transform: uppercase;
+}
+
+/* ── Damage numbers ────────────────────────────────────────────────────── */
+#dmg-layer { position: absolute; inset: 0; overflow: hidden; }
+.dmg {
+  position: absolute; left: 0; top: 0; will-change: transform, opacity;
+  font-family: "Cinzel", Georgia, serif; font-weight: 700; font-size: 22px;
+  transform: translate(-50%,-50%); white-space: nowrap;
+  text-shadow: 0 0 4px #000, 0 2px 3px #000, 1px 1px 0 #000, -1px -1px 0 #000;
+}
+.dmg.crit { font-size: 34px; font-weight: 800; letter-spacing: .02em; }
+.dmg.crit .crit-mark { font-size: .6em; vertical-align: super; opacity: .9; }
+
+/* ── Tooltip ───────────────────────────────────────────────────────────── */
+#tooltip {
+  position: absolute; top: 0; left: 0; min-width: 210px; max-width: 320px;
+  padding: 0; z-index: 40; opacity: 0; transform: translateZ(0);
+  background:
+    linear-gradient(180deg, rgba(18,16,11,.97), rgba(6,7,10,.98)),
+    var(--tex-parch) repeat;
+  background-blend-mode: overlay, normal;
+  border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(201,162,39,.34), 0 8px 30px rgba(0,0,0,.85);
+  display: none; will-change: transform;
+}
+#tooltip .tt-head {
+  text-align: center; padding: 8px 16px 6px; font-size: 15px; letter-spacing: .04em;
+  border-bottom: 1px solid rgba(201,162,39,.2);
+  background: linear-gradient(180deg, rgba(255,255,255,.05), transparent);
+}
+#tooltip .tt-base { text-align: center; font-size: 12px; color: #b7ac86; padding: 1px 16px 4px; }
+#tooltip .tt-body { padding: 6px 16px 10px; }
+#tooltip .tt-line { font-size: 12px; line-height: 1.5; text-align: center; }
+#tooltip .tt-line.implicit { color: #9a8cff; }
+#tooltip .tt-line.prefix, #tooltip .tt-line.suffix { color: #8fb7ff; }
+#tooltip .tt-line.req { color: #9a9078; font-size: 11px; }
+#tooltip .tt-sep {
+  height: 1px; margin: 6px 22px; background: linear-gradient(90deg, transparent, rgba(201,162,39,.55), transparent);
+}
+#tooltip .tt-sub { text-align: center; font-size: 10px; letter-spacing: .18em; color: #6f6852; text-transform: uppercase; padding-top: 3px; }
+
+/* ── Inventory ─────────────────────────────────────────────────────────── */
+#inv-scrim {
+  position: absolute; inset: 0; background: radial-gradient(circle at 50% 44%, rgba(0,0,0,.35), rgba(0,0,0,.7));
+  opacity: 0; display: none; z-index: 30;
+}
+#inventory {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%) scale(.96);
+  z-index: 31; display: none; opacity: 0; padding: 30px 26px 24px;
+  will-change: transform, opacity;
+}
+#inventory.open, #inv-scrim.open { display: block; }
+#inventory .inv-cols { display: flex; gap: 26px; align-items: flex-start; }
+.paperdoll { position: relative; width: 200px; }
+.eq-slot {
+  position: absolute; background: rgba(6,7,10,.7); border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(201,162,39,.24), inset 0 -6px 12px rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center;
+}
+.eq-slot .eq-ph { font-size: 8px; letter-spacing: .12em; color: #504a3a; text-transform: uppercase; text-align: center; }
+.eq-slot canvas { width: 100%; height: 100%; }
+.eq-slot.hi { box-shadow: inset 0 0 0 2px #6cff8f, inset 0 -6px 12px rgba(0,0,0,.6); }
+.eq-slot.bad { box-shadow: inset 0 0 0 2px #ff5a4e, inset 0 -6px 12px rgba(0,0,0,.6); }
+
+.grid-wrap { position: relative; }
+.inv-grid {
+  position: relative; display: grid; background: rgba(4,5,8,.6);
+  border: 1px solid #000; box-shadow: inset 0 0 0 1px rgba(201,162,39,.24), inset 0 0 40px rgba(0,0,0,.7);
+}
+.inv-cell { border-right: 1px solid rgba(201,162,39,.06); border-bottom: 1px solid rgba(201,162,39,.06); }
+.inv-item {
+  position: absolute; z-index: 2; background: rgba(10,10,14,.55); border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px currentColor, inset 0 -6px 14px rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.inv-item.clickable { cursor: grab; }
+.inv-item canvas { width: 100%; height: 100%; }
+.inv-item .stack {
+  position: absolute; right: 2px; bottom: 0; font-size: 11px; color: #f3e6c2;
+  text-shadow: 0 0 3px #000, 0 1px 1px #000; font-weight: 700;
+}
+.inv-item.dragging { opacity: .35; }
+.inv-ghost { position: absolute; z-index: 50; pointer-events: none; opacity: .9; will-change: transform;
+  display: flex; align-items: center; justify-content: center; border: 1px solid #000; }
+.inv-ghost canvas { width: 100%; height: 100%; }
+.place-hi { position: absolute; z-index: 3; pointer-events: none; }
+.place-hi.ok  { background: rgba(108,255,143,.16); box-shadow: inset 0 0 0 1px rgba(108,255,143,.7); }
+.place-hi.bad { background: rgba(255,90,78,.16);  box-shadow: inset 0 0 0 1px rgba(255,90,78,.7); }
+
+/* ── Minimap ───────────────────────────────────────────────────────────── */
+#minimap { position: absolute; top: 16px; right: 16px; width: 190px; height: 190px; }
+#minimap canvas { position: absolute; inset: 4px; width: calc(100% - 8px); height: calc(100% - 8px); z-index: 1; }
+#minimap .mm-frame { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+#minimap .mm-zone {
+  position: absolute; top: 8px; left: 0; right: 0; text-align: center; z-index: 3;
+  font-size: 10px; letter-spacing: .2em; color: var(--gold-lite); text-transform: uppercase;
+  text-shadow: 0 0 6px #000;
+}
+
+/* ── Boss bar ──────────────────────────────────────────────────────────── */
+#bossbar {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%) translateY(-14px);
+  width: min(560px, 52vw); padding: 10px 16px 12px; opacity: 0; display: none;
+  will-change: transform, opacity;
+}
+#bossbar.show { display: block; }
+#bossbar .boss-name {
+  text-align: center; font-size: 15px; letter-spacing: .16em; color: #e8d49a; text-transform: uppercase;
+  text-shadow: 0 0 8px rgba(201,162,39,.5), 0 1px 2px #000; margin-bottom: 5px;
+}
+#bossbar .boss-track {
+  position: relative; height: 16px; background: #0a0407; border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(201,162,39,.3), inset 0 -4px 8px rgba(0,0,0,.7);
+  overflow: hidden;
+}
+#bossbar .boss-ghost {
+  position: absolute; inset: 0; transform-origin: left; transform: scaleX(1);
+  background: linear-gradient(180deg, #6b1a1a, #3a0808); will-change: transform;
+}
+#bossbar .boss-fill {
+  position: absolute; inset: 0; transform-origin: left; transform: scaleX(1);
+  background: linear-gradient(180deg, #ff5a4e, #b81f24 55%, #6e1014);
+  box-shadow: 0 0 10px rgba(184,31,36,.6); will-change: transform;
+}
+#bossbar .boss-tick { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(0,0,0,.75); z-index: 3; }
+#bossbar .boss-phase {
+  position: absolute; right: 4px; top: -1px; z-index: 4; font-size: 10px; letter-spacing: .12em;
+  color: #f0d97a; text-shadow: 0 0 4px #000;
+}
+
+/* ── Toasts ────────────────────────────────────────────────────────────── */
+#toasts {
+  position: absolute; right: 220px; top: 120px; width: 240px; z-index: 20;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 5px;
+}
+.toast {
+  position: relative; max-width: 240px; padding: 5px 12px 5px 14px;
+  background: linear-gradient(90deg, rgba(6,7,10,.2), rgba(8,9,13,.92));
+  border-right: 2px solid currentColor;
+  box-shadow: -8px 0 18px rgba(0,0,0,.5); font-size: 12px; letter-spacing: .03em;
+  text-align: right; will-change: transform, opacity; transform: translateX(40px); opacity: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.toast .t-txt { color: #e6d9b3; }
+.toast.in { transform: translateX(0); opacity: 1; }
+.toast.out { transform: translateX(40px); opacity: 0; }
+
+/* ── Debug overlay (F3) ────────────────────────────────────────────────── */
+#debug {
+  position: absolute; top: 16px; left: 16px; z-index: 60; display: none;
+  padding: 8px 12px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px;
+  line-height: 1.5; color: #9fe6a0; background: rgba(4,6,9,.82);
+  border: 1px solid rgba(201,162,39,.35); box-shadow: 0 4px 16px rgba(0,0,0,.7);
+  letter-spacing: .02em; min-width: 168px;
+}
+#debug.show { display: block; }
+#debug .d-row { display: flex; justify-content: space-between; gap: 14px; }
+#debug .d-k { color: #6f7d6f; }
+#debug .d-v { color: #d6f2c0; font-weight: 600; }
+#debug .d-fps.warn { color: #ffcf5e; }
+#debug .d-fps.bad { color: #ff6a5e; }
+#debug .d-title { color: var(--gold-lite); letter-spacing: .2em; margin-bottom: 4px; text-transform: uppercase; }
+
+/* ── Custom cursor (OS cursor is hidden globally) ─────────────────────── */
+#cursor { position: absolute; z-index: 90; width: 26px; height: 26px; margin: -13px 0 0 -13px;
+  pointer-events: none; will-change: transform; }
+
+/* ── End screen (victory / death) ──────────────────────────────────────────
+   The run's terminal state. Full-bleed vignette + a forged gold-ruled plate,
+   never a rounded card. Transform/opacity only so the reveal is compositor-only
+   on a frame where the death VFX is also playing. */
+#endscreen {
+  position: absolute; inset: 0; z-index: 90;
+  display: none; align-items: center; justify-content: center;
+  background:
+    radial-gradient(ellipse at 50% 45%, rgba(4,5,8,.62) 0%, rgba(3,4,6,.93) 62%, #020304 100%);
+  opacity: 0; transition: opacity .9s ease-out;
+  will-change: opacity;
+}
+#endscreen.es-in { opacity: 1; }
+
+#endscreen .es-panel {
+  position: relative; min-width: 420px; padding: 34px 54px 28px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(11,12,17,.90), rgba(5,6,9,.96));
+  border-top: 2px solid var(--gold); border-bottom: 2px solid var(--gold-deep);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.9), 0 24px 70px rgba(0,0,0,.85),
+              inset 0 1px 0 rgba(240,217,122,.10);
+  transform: translateY(14px) scale(.985);
+  transition: transform 1.0s cubic-bezier(.16,.84,.28,1);
+  will-change: transform;
+}
+#endscreen.es-in .es-panel { transform: translateY(0) scale(1); }
+
+#endscreen .es-kicker {
+  font-size: 11px; letter-spacing: .34em; text-transform: uppercase;
+  color: var(--dim); margin-bottom: 10px;
+}
+#endscreen .es-title {
+  font-size: 62px; line-height: 1; letter-spacing: .12em; font-weight: 400;
+  text-shadow: 0 2px 0 #000, 0 0 34px rgba(201,162,39,.30);
+}
+#endscreen.es-won  .es-title { color: var(--gold-lite); }
+#endscreen.es-lost .es-title { color: #a8332c; text-shadow: 0 2px 0 #000, 0 0 34px rgba(168,51,44,.34); }
+
+#endscreen .es-sub {
+  margin-top: 12px; font-size: 14px; letter-spacing: .05em; color: var(--text); opacity: .86;
+}
+
+/* Gold hairline above the stat block — a rule, not a border-box. */
+#endscreen .es-stats {
+  margin: 22px auto 0; padding-top: 18px; min-width: 300px;
+  border-top: 1px solid rgba(201,162,39,.28);
+}
+#endscreen .es-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 5px 0; font-size: 13px; letter-spacing: .04em;
+}
+#endscreen .es-k { color: var(--dim); }
+#endscreen .es-v { color: var(--text); font-variant-numeric: tabular-nums; }
+
+#endscreen .es-hint {
+  margin-top: 24px; font-size: 11px; letter-spacing: .22em; text-transform: uppercase;
+  color: var(--gold); opacity: .72;
+  animation: es-pulse 2.4s ease-in-out infinite;
+}
+@keyframes es-pulse { 0%,100% { opacity: .40; } 50% { opacity: .92; } }
+
+/* ── FPS meter ─────────────────────────────────────────────────────────────
+   Always visible, top-left, above the minimap's corner. Monospace so the digits
+   do not jitter the layout as they change. */
+#fpsmeter {
+  position: absolute; top: 14px; left: 16px; z-index: 70;
+  display: flex; flex-direction: column; align-items: flex-start;
+  padding: 5px 10px 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  background: rgba(4,6,9,.62);
+  border-left: 2px solid currentColor;
+  text-shadow: 0 1px 2px rgba(0,0,0,.9);
+}
+#fpsmeter .fm-main { font-size: 15px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+#fpsmeter .fm-sub  { font-size: 10px; line-height: 1.3; opacity: .70; letter-spacing: .02em; }
+#fpsmeter.fm-good { color: #9fe6a0; }
+#fpsmeter.fm-ok   { color: #e8c96a; }
+#fpsmeter.fm-bad  { color: #e0655a; }
+
+/* ── Objective compass ─────────────────────────────────────────────────────
+   Bottom-centre, above the skill bar. Points at the arena in SCREEN space so it
+   agrees with the WASD basis. */
+#objective {
+  position: absolute; left: 50%; bottom: 108px; z-index: 65;
+  transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  opacity: .90;
+}
+#objective svg { width: 34px; height: 34px; filter: drop-shadow(0 2px 4px rgba(0,0,0,.85)); }
+#objective .ob-label {
+  font-size: 9px; letter-spacing: .26em; color: var(--gold); opacity: .80;
+  text-shadow: 0 1px 2px #000;
+}
+#objective .ob-dist {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px; color: var(--text); opacity: .78; font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px #000;
+}

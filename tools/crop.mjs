@@ -1,0 +1,14 @@
+#!/usr/bin/env node
+// Crop a window from a PNG and nearest-neighbour upscale Nx; write PNG. For eyeballing.
+// usage: crop.mjs <in.png> <out.png> <x0> <y0> <x1> <y1> [scale=3]
+import { readFileSync, writeFileSync } from 'node:fs';
+import { inflateSync, deflateSync } from 'node:zlib';
+function decodePNG(buf){if(buf.readUInt32BE(0)!==0x89504e47)throw new Error('not a PNG');let pos=8,W=0,H=0,bd=0,ct=0;const idat=[];while(pos<buf.length){const len=buf.readUInt32BE(pos);const type=buf.toString('ascii',pos+4,pos+8);const data=buf.subarray(pos+8,pos+8+len);if(type==='IHDR'){W=data.readUInt32BE(0);H=data.readUInt32BE(4);bd=data[8];ct=data[9];}else if(type==='IDAT')idat.push(data);else if(type==='IEND')break;pos+=12+len;}const ch=ct===6?4:ct===2?3:1;const raw=inflateSync(Buffer.concat(idat));const stride=W*ch;const rgb=new Uint8Array(W*H*3);const cur=new Uint8Array(stride),prev=new Uint8Array(stride);let rp=0;const paeth=(a,b,c)=>{const p=a+b-c,pa=Math.abs(p-a),pb=Math.abs(p-b),pc=Math.abs(p-c);return pa<=pb&&pa<=pc?a:pb<=pc?b:c;};for(let y=0;y<H;y++){const f=raw[rp++];for(let x=0;x<stride;x++){const rb=raw[rp++];const a=x>=ch?cur[x-ch]:0;const b=prev[x];const c=x>=ch?prev[x-ch]:0;let v;switch(f){case 0:v=rb;break;case 1:v=rb+a;break;case 2:v=rb+b;break;case 3:v=rb+((a+b)>>1);break;case 4:v=rb+paeth(a,b,c);break;}cur[x]=v&0xff;}for(let x=0;x<W;x++){const o=(y*W+x)*3,s=x*ch;rgb[o]=cur[s];rgb[o+1]=ch===1?cur[s]:cur[s+1];rgb[o+2]=ch===1?cur[s]:cur[s+2];}prev.set(cur);}return{width:W,height:H,rgb};}
+function crc32(buf){let c=~0;for(let i=0;i<buf.length;i++){c^=buf[i];for(let k=0;k<8;k++)c=(c>>>1)^(0xEDB88320&-(c&1));}return ~c>>>0;}
+function chunk(type,data){const len=Buffer.alloc(4);len.writeUInt32BE(data.length,0);const t=Buffer.from(type,'ascii');const crc=Buffer.alloc(4);crc.writeUInt32BE(crc32(Buffer.concat([t,data])),0);return Buffer.concat([len,t,data,crc]);}
+function encodePNG(W,H,rgb){const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(W,0);ihdr.writeUInt32BE(H,4);ihdr[8]=8;ihdr[9]=2;const stride=W*3;const raw=Buffer.alloc((stride+1)*H);for(let y=0;y<H;y++){raw[y*(stride+1)]=0;for(let x=0;x<stride;x++)raw[y*(stride+1)+1+x]=rgb[y*stride+x];}const idat=deflateSync(raw);return Buffer.concat([Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]),chunk('IHDR',ihdr),chunk('IDAT',idat),chunk('IEND',Buffer.alloc(0))]);}
+const[inp,outp,x0,y0,x1,y1]=process.argv.slice(2);const scale=+(process.argv[8]||3);
+const p=decodePNG(readFileSync(inp));const W=p.width;
+const cw=(+x1)-(+x0),chh=(+y1)-(+y0);const ow=cw*scale,oh=chh*scale;const out=new Uint8Array(ow*oh*3);
+for(let y=0;y<oh;y++)for(let x=0;x<ow;x++){const sx=(+x0)+Math.floor(x/scale),sy=(+y0)+Math.floor(y/scale);const si=(sy*W+sx)*3,oi=(y*ow+x)*3;out[oi]=p.rgb[si];out[oi+1]=p.rgb[si+1];out[oi+2]=p.rgb[si+2];}
+writeFileSync(outp,encodePNG(ow,oh,out));console.log('wrote',outp,ow+'x'+oh);
