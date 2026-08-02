@@ -1,4 +1,4 @@
-# SUNDERFALL
+# EXILUM
 
 An isometric action RPG that runs in the browser. Three.js, no game engine, and **no art assets** —
 every texture, mesh, animation, and sound is generated procedurally at load time.
